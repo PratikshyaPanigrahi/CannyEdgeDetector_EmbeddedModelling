@@ -1,0 +1,104 @@
+I worked on System C for this assignment. For the first step I implemented a for loop to iterate over the 20 image source and give 
+20 different outputs. Next I designed a test bench module consisting of Stimulus, Monitor and Platform. Platform in itself consists 
+of a DATA IN MODULE, DUT MODULE and DATA OUT MODULE. I defined the read_pgm_image and write_pgm_image function in Stimulus and Monitor Modules respectively. and rest of the canny code was defined and called in DUT module inside Platform.
+All the port bingings amond the module and TP module was defined after that. 
+
+After that I converted functions inside the DUT Module into smalled Modules. Now all these threads can be implemented 
+parallelly for all images. Further I have converted the functions inside gaussian_smooth Module into 4 smaller Module and executed 
+them also parallely. Each threads is executed in an infinitely inside the Module. I have used channels for synchronization. This is 
+an untimed implementation. All the results came out to be without any difference from the target images.The desired result was obtained.
+
+Part 1:Flat Profiling
+This is the complexity comparision table based on the relative computational load of the DUT components assuming the total DUT 
+is 100%.
+
+Module			   %
+Gaussian_Smooth		64.273%
+|-------Receive_Image	0.0%
+|-------Gaussian_Kernel	0.0%
+|-------BlurX		28.765%
+\-------BlurY		35.508%
+Derivative_X_Y		9.604%
+Magnitude_X_Y		6.4165%
+Non_Max_Supp		10.6579%
+Apply_Heysterisis	9.02664%
+			---------
+			100%
+Part 2:Absolute Timing Complexity on reference platform
+This is the complexity comparision table based on the absolute timing information of the DUT components assuming the total DUT 
+is 100%. Here we measure the absolute timing for each function call by measuring the performance on a reference platform.
+	
+Module			sec/frame 	   %
+Gaussian_Smooth		1.926sec	64.264%
+|-------Receive_Image	0.00sec		0.00000%
+|-------Gaussian_Kernel	0.00sec		0.00000%
+|-------BlurX		0.9335sec	31.147%
+\-------BlurY		0.993sec	33.1331%
+Derivative_X_Y		0.3335sec	11.1278%
+Magnitude_X_Y		0.4085sec	13.6302%
+Non_Max_Supp		0.1275sec	4.25425%
+Apply_Heysterisis	0.201sec	6.70670%
+			---------	--------
+			2.997sec	100%
+
+For both the calculations and analysis I used gprof tool for profiling in SystemC
+Then I took few other steps to parallalize and pipeline the model a bit more to speedup the whole process. The model now looks like:-
+DUT
+|------ Gaussian_Smooth gaussian_smooth
+| |------ Receive_Image receive 
+| \------ Gaussian_Kernel gauss
+|------ BlurX blurX
+| |------ BlurX_Slice sliceX1
+| |------ BlurX_Slice sliceX2
+| |------ BlurX_Slice sliceX3
+| |------ BlurX_Slice sliceX4
+| |------ BlurX_Slice sliceX5
+| |------ BlurX_Slice sliceX6
+| |------ BlurX_Slice sliceX7
+| \------ BlurX_Slice sliceX8
+|------ BlurY blurY
+| |------ BlurY_Slice sliceY1
+| |------ BlurY_Slice sliceY2
+| |------ BlurY_Slice sliceY3
+| | [...]
+| |------ BlurY_Slice sliceY7
+| \------ BlurY_Slice sliceY8
+|------ Derivative_X_Y derivative_x_y
+|------ Magnitude_X_Y magnitude_x_y
+|------ Non_Max_Supp non_max_supp
+\------ Apply_Hysteresis apply_hysteresis 
+
+Model			Frame Delay 	Throughput	Total Simulation Time		Purpose
+
+CannyA8_step1		0ms		Infinity		0ms
+CannyA8_step2		17340ms		NA			45220ms		 Pipelining and Parallelization of the Canny Model 
+CannyA8_step3		17340ms		0.497512FPS		45220ms		 Back-annotate estimated timing in the DUT components
+CannyA8_step4		17340ms		0.497512FPS		45220ms		 Pipeline the DUT into stages for each component
+CannyA8_step5		17340ms		0.497512FPS		45220ms		 Integrate the Gaussian Smooth components into the pipeline stages
+CannyA8_step6		11773750us	1.041667FPS		21631250us	 Slice the BlurX and BlurY blocks into parallel components
+	
+Here for each step I have taken the longest Delay it takes for a frame to process a frame, Throughput of the step (Frames per second) 
+and the total simulation time for the whole step. We observe that after parallelizing the Blurx and Blury function, we 
+observe that the whole process speeds up a lot. The bottleneck is reduced to 0.96seconds from 2.010seconds.
+
+
+Calculating the speedup obtained due to optimization (-o2, -03)
+	
+Module
+Tgk		0.00sec			
+Tbx		6.88sec/1.30sec=5.292	
+Tby		7.94sec/1.64sec=4.841	
+Tde		2.38sec/0.44sec=5.409
+Tma		2.19sec/0.96sec=2.28125	
+Tnm		2.57sec/1.59sec=1.6163
+Tah		2.72sec/0.93sec=2.9247
+Tot		24.68sec/6.86sec=3.5976
+	
+		
+step 3 is necessary for our real time video goal because this whole code will be finally implemented on a Rasberrypie device 
+which doesn't have a dedicated floating point controller, so in the real time environment it will take a lot of time to do floating 
+point calculations and hence changing it to integer will definitely speed up the process.
+
+Model		Frame Delay		Throughput		Total Time
+CannyA9_step2	0.384sec		2.604			8746500us	
+CannyA9_step3	0.364sec		2.474			8338500us
